@@ -26,6 +26,7 @@ Here is a description for the main functions.
 
 ### EMC
 `EMC = function(data, h=NULL, eps=1.0e-8, max.iterations=100, ...) UseMethod("EMC")`
+
 `EMC.default = function(data, h=NULL, eps=1.0e-8, max.iterations=100, n0= NULL, rho=NULL, cut=0.1, noisy = F, T_denoise =5)`
 - Enhanced mode clustering.
 - Inputs:
