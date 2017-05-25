@@ -1,13 +1,12 @@
-# Author: Yen-Chi Chen, Christopher R. Genovese, Larry Wasserman
-# Maintainer: Yen-Chi Chen <yenchic@andrew.cmu.edu>
-# Reference: Chen, Yen-Chi, Christopher R. Genovese, and Larry Wasserman. "Enhanced mode clustering." arXiv preprint arXiv:1406.1780 (2014).
-# Date: 10/13/2015
 #' @import RANN
 library(RANN)
 #' @import MASS
 library(MASS)
 #' @import Rcpp
 library(Rcpp)
+#' @import mvtnorm
+library(mvtnorm)
+
 
 cppFunction('NumericVector MSCpp(NumericMatrix data, NumericMatrix query, double h, int max_iterations , double eps){
 	int n = data.nrow(), d = data.ncol(), m = query.nrow();
@@ -96,6 +95,46 @@ MS = function(data, query, h, max.iterations=200, eps= 1e-15){
 	return(matrix(tmp, ncol=ncol(query)))
 }
 
+#' High dimensional five clusters dataset
+#' @param N.c Sample size per each cluster
+#' @param N.f Sample size per filaments
+#' @param dis.c Randomness around clusters
+#' @param dis.f Randomness around filaments
+#' @param d.add Added dimensions.
+#' @return A five clusters dataset with 3+d.add dimensions.
+#' @export
+five_cluster = function(N.c=200, N.f=100, dis.c=0.01, dis.f=0.005, d.add=7){
+  ## setting clusters
+  C0.1 = c(0,0,0)
+  C0.2 = c(0.1,0,0)
+  C0.3 = c(0,0.1,0)
+  C0.4 = c(0,0,0.1)
+  C0.5 = c(0,0.1,0.1)
+  C0 = cbind(rbind(C0.1,C0.2,C0.3,C0.4,C0.5), matrix(0,nrow=5, ncol=d.add))
+  
+  ## settting total dimensions
+  d= d.add+3
+  
+  ## adding edges
+  C = NULL
+  for(i.c in 1:5){
+    C = rbind(C, rmvnorm(N.c,C0[i.c,],sigma = diag(rep(dis.c^2,d))))
+  }
+  U0.1= runif(N.f)
+  E1 = t((C0.2-C0.1)%o%U0.1)
+  U0.1= runif(N.f)
+  E2 = t((C0.3-C0.1)%o%U0.1)
+  U0.1= runif(N.f)
+  E3 = t((C0.4-C0.1)%o%U0.1)
+  U0.1= runif(N.f)
+  E4 = t((C0.5-C0.4)%o%U0.1+C0.4)
+  E0 = cbind(rbind(E1,E2,E3,E4),matrix(0,nrow=4*N.f, ncol=d.add))	
+  E = E0+matrix(rnorm(nrow(E0)*ncol(E0),sd=dis.f), nrow=nrow(E0), ncol=ncol(E0))
+  
+  X = rbind(C,E)
+  return(X)
+}
+
 
 #' Hitting probability for soft mode clustering.
 #' @param data Input data points.
@@ -142,7 +181,7 @@ fms = function(data, query, h, eps=1.0e-8, max.iterations=100, cut = 0.1){
 	pt_ms = MS(data, query, h=h, eps=eps, max.iterations= max.iterations)
 	D1 = dist(pt_ms)
 	D1_hclust = hclust(D1)
-	cluster_lab= cutree(D1_hclust, h=cut*h)
+	cluster_lab= cutree(D1_hclust, h=0.1*h)
 		# find the cluster lable
 		
 	modes = matrix(NA, nrow=max(cluster_lab), ncol=ncol(data))
@@ -264,7 +303,7 @@ EMC_old = function(data, h=NULL, max.iterations=1000, eps=1.0e-8, n0= NULL, rho=
 	
 	### Step 1: original mode clustering
 	cat("Step 1: Mode clustering... ")
-	cluster = fms(X,X,h=h, cut=cut, eps= eps, max.iterations= max.iterations)
+	cluster = fms(data,data,h=h, cut=cut, eps= eps, max.iterations= max.iterations)
 	cluster_lab= cluster$label
 	modes = cluster$modes
 	cat(" Done.\n")
@@ -287,7 +326,7 @@ EMC_old = function(data, h=NULL, max.iterations=1000, eps=1.0e-8, n0= NULL, rho=
 			idx_tiny = unique(c(idx_tiny, w_tmp))
 		}
 		
-		cluster_tmp = fms(X[-idx_tiny,],X, h)
+		cluster_tmp = fms(data[-idx_tiny,],data, h)
 		cluster_lab_tmp = cluster_tmp$label
 		idx_tiny_mode = which(table(factor(cluster_lab_tmp))<n0)
 		cat("Iteration to denoise: ")
@@ -309,7 +348,7 @@ EMC_old = function(data, h=NULL, max.iterations=1000, eps=1.0e-8, n0= NULL, rho=
 
 	### Step 3: measuring connectivity 
 	cat("Step 3: Measuring connectivity... ")
-	soft_hp = HP.soft(X, h, modes_sig)
+	soft_hp = HP.soft(data, h, modes_sig)
 	Cn_matrix = matrix(NA, n_modes_sig, n_modes_sig)
 	for(i.c in 1:n_modes_sig){
 		tmp = colSums(soft_hp[which(cluster_lab_sig ==i.c),])/nrow(soft_hp[which(cluster_lab_sig ==i.c),])
@@ -320,7 +359,7 @@ EMC_old = function(data, h=NULL, max.iterations=1000, eps=1.0e-8, n0= NULL, rho=
 
 	### Step 4: visualization coordinates
 	cat("Step 4: Dimension reducting... ")
-	vis_data = vis.cluster(X, cluster_lab_sig, modes_sig, rho=rho)
+	vis_data = vis.cluster(data, cluster_lab_sig, modes_sig, rho=rho)
 	cat(" Done.\n")
 	
 	result$labels = cluster_lab_sig
@@ -429,7 +468,7 @@ EMC.default = function(data, h=NULL, eps=1.0e-8, max.iterations=100, n0= NULL, r
 	
 	### Step 1: original mode clustering
 	cat("Step 1: Mode clustering... ")
-	cluster = fms(X,X,h=h, cut=cut, eps= eps, max.iterations= max.iterations)
+	cluster = fms(data,data,h=h, cut=cut, eps= eps, max.iterations= max.iterations)
 	cluster_lab= cluster$label
 	modes = cluster$modes
 	cat(" Done.\n")
@@ -452,7 +491,7 @@ EMC.default = function(data, h=NULL, eps=1.0e-8, max.iterations=100, n0= NULL, r
 			idx_tiny = unique(c(idx_tiny, w_tmp))
 		}
 		
-		cluster_tmp = fms(X[-idx_tiny,],X, h)
+		cluster_tmp = fms(data[-idx_tiny,],data, h)
 		cluster_lab_tmp = cluster_tmp$label
 		idx_tiny_mode = which(table(factor(cluster_lab_tmp))<n0)
 		cat("Iteration to denoise: ")
@@ -474,7 +513,7 @@ EMC.default = function(data, h=NULL, eps=1.0e-8, max.iterations=100, n0= NULL, r
 
 	### Step 3: measuring connectivity 
 	cat("Step 3: Measuring connectivity... ")
-	soft_hp = HP.soft(X, h, modes_sig)
+	soft_hp = HP.soft(data, h, modes_sig)
 	Cn_matrix = matrix(NA, n_modes_sig, n_modes_sig)
 	for(i.c in 1:n_modes_sig){
 		tmp = colSums(soft_hp[which(cluster_lab_sig ==i.c),])/nrow(soft_hp[which(cluster_lab_sig ==i.c),])
@@ -485,7 +524,7 @@ EMC.default = function(data, h=NULL, eps=1.0e-8, max.iterations=100, n0= NULL, r
 
 	### Step 4: visualization coordinates
 	cat("Step 4: Dimension reducting... ")
-	vis_data = vis.cluster(X, cluster_lab_sig, modes_sig, rho=rho)
+	vis_data = vis.cluster(data, cluster_lab_sig, modes_sig, rho=rho)
 	cat(" Done.\n")
 	
 	result$labels = cluster_lab_sig
